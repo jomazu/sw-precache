@@ -5,7 +5,18 @@
 > Precache specific resources
 
 Service Worker Precache is a module for generating a service worker that
-precaches resources. The module can be used in JavaScript-based build scripts,
+precaches resources. It integrates with your build process. Once configured, it
+detects all your static resources (HTML, JavaScript, CSS, images, etc.) and
+generates a hash of each file's contents. Information about each file's URL and
+versioned hash are stored in the generated service worker file, along with logic
+to serve those files cache-first, and automatically keep those files up to date
+when changes are detected in subsequent builds.
+
+Serving your local static resources cache-first means that you can get all the
+crucial scaffolding for your web app—your App Shell—on the screen without having
+to wait for any network responses.
+
+The module can be used in JavaScript-based build scripts,
 like those written with [`gulp`](http://gulpjs.com/), and it also provides a
 [command-line interface](#command-line-interface). You can use the module
 directly, or if you'd prefer, use of the [wrappers](#wrappers-and-starter-kits)
@@ -30,6 +41,7 @@ The full documentation is in this README, and the
   - [Example](#example)
   - [Considerations](#considerations)
   - [Command-line interface](#command-line-interface)
+  - [Runtime Caching](#runtime-caching)
 - [API](#api)
   - [Methods](#methods)
     - [generate(options, callback)](#generateoptions-callback)
@@ -124,7 +136,7 @@ gulp.task('generate-service-worker', function(callback) {
   var swPrecache = require('sw-precache');
   var rootDir = 'app';
 
-  swPrecache.write(path.join(rootDir, 'service-worker.js'), {
+  swPrecache.write(`${rootDir}/service-worker.js`, {
     staticFileGlobs: [rootDir + '/**/*.{js,html,css,png,jpg,gif,svg,eot,ttf,woff}'],
     stripPrefix: rootDir
   }, callback);
@@ -152,7 +164,7 @@ thread as soon as the service worker is installed. You should be judicious in wh
 more data then is strictly necessary.
 
 - Precaching doesn't make sense for all types of resources (see the previous
-point). Other caching strategies, like those outlined in the [Offline Cookbook](http://jakearchibald.com/2014/offline-cookbook/), can be used in
+point). Other caching strategies, like those outlined in the [Offline Cookbook](https://developers.google.com/web/fundamentals/instant-and-offline/offline-cookbook/), can be used in
 conjunction with `sw-precache` to provide the best experience for your users. If
 you do implement additional caching logic, put the code in a separate JavaScript
 file and include it using the `importScripts()` method.
@@ -170,7 +182,8 @@ the service worker lifecycle event you can listen for to trigger this message.
 
 For those who would prefer not to use `sw-precache` as part of a `gulp` or
 `Grunt` build, there's a [command-line interface](cli.js) which supports the
-[options listed](#options-parameter) in the API, provided via flags.
+[options listed](#options-parameter) in the API, provided via flags or an
+external JavaScript configuration file.
 
 **Warning:** When using `sw-precache` "by hand", outside of an automated build process, it's your
 responsibility to re-run the command each time there's a change to any local resources! If `sw-precache`
@@ -195,19 +208,40 @@ $ sw-precache --root=dist --static-file-globs='dist/**/*.html'
 to your shell (such as the `*` characters in the sample command line above,
 for example).
 
-Finally, there's support for storing a complex configuration in an external
-JSON file, using `--config <file>`. Any of the options from the file can be
-overridden via a command-line flag. For example,
+Finally, there's support for passing complex configurations using `--config <file>`.
+Any of the options from the file can be overridden via a command-line flag.
+We strongly recommend passing it an external JavaScript file defining config via
+[`module.exports`](https://nodejs.org/api/modules.html#modules_module_exports).
+For example, assume there's a `path/to/sw-precache-config.js` file that contains:
 
-```sh
-$ sw-precache --config=path/to/sw-precache-config.json --verbose --no-handle-fetch
+```js
+module.exports = {
+  staticFileGlobs: [
+    'app/css/**.css',
+    'app/**.html',
+    'app/images/**.*',
+    'app/js/**.js'
+  ],
+  stripPrefix: 'app/',
+  runtimeCaching: [{
+    urlPattern: /this\\.is\\.a\\.regex/,
+    handler: 'networkFirst'
+  }]
+};
 ```
 
-will generate a service worker file using the options provided in the
-`path/to/sw-precache-config.json` file, but with the `verbose` option set to
-`true` and the `handleFetch` option set to `false`.
+That file could be passed to the command-line interface, while also setting the
+`verbose` option, via
 
-`sw-precache-config.json` might look like:
+```sh
+$ sw-precache --config=path/to/sw-precache-config.js --verbose
+```
+
+This provides the most flexibility, such as providing a regular expression for
+the `runtimeCaching.urlPattern` option.
+
+We also support passing in a JSON file for `--config`, though this provides
+less flexibility:
 
 ```json
 {
@@ -217,9 +251,19 @@ will generate a service worker file using the options provided in the
     "app/images/**.*",
     "app/js/**.js"
   ],
-  "stripPrefix": "app/"
+  "stripPrefix": "app/",
+  "runtimeCaching": [{
+    "urlPattern": "/express/style/path/(.*)",
+    "handler": "networkFirst"
+  }]
 }
 ```
+
+## Runtime Caching
+
+It's often desireable, even necessary to use precaching and runtime caching together. You may have seen our [`sw-toolbox`](https://github.com/GoogleChrome/sw-toolbox) tool, which handles runtime caching, and wondered how to use them together. Fortunately, `sw-precache` handles this for you.
+
+The `sw-precache` module has the ability to include the `sw-toolbox` code and configuration alongside its own configuration. Using the `runtimeCaching` configuration option in `sw-precache` ([see below](#runtimecaching-arrayobject)) is a shortcut that accomplishes what you could do manually by importing `sw-toolbox` in your service worker and writing your own routing rules.
 
 ## API
 
@@ -245,7 +289,7 @@ Since 2.2.0, `generate()` also returns a
 `write` takes in [options](#options), generates a service worker from them, 
 and writes the service worker to a specified file. This method always 
 invokes `callback(error)`. If no error was found, the `error` parameter will 
-be `null'
+be `null`
 
 Since 2.2.0, `write()` also returns a [`Promise`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Promise).
 
@@ -305,9 +349,14 @@ is not needed, and can be safely excluded.
 `dontCacheBustUrlsMatching` gives you a way of opting-in to skipping the cache
 busting behavior for a subset of your URLs (or all of them, if a catch-all value
 like `/./` is used).
-If set, then each URL that's prefetched will be matched against this value.
+If set, then the [pathname](https://developer.mozilla.org/en-US/docs/Web/API/HTMLHyperlinkElementUtils/pathname)
+of each URL that's prefetched will be matched against this value.
 If there's a match, then the URL will be prefetched as-is, without an additional
 cache-busting URL parameter appended.
+
+Note: Prior to `sw-precache` v5.0.0, `dontCacheBustUrlsMatching` matched against
+the entire request URL. As of v5.0.0, it only matches against the URL's
+[pathname](https://developer.mozilla.org/en-US/docs/Web/API/HTMLHyperlinkElementUtils/pathname).
 
 _Default_: not set
 
@@ -418,12 +467,13 @@ your generated service worker file.
 Each `Object` in the `Array` needs a `urlPattern`, which is either a
 [`RegExp`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/RegExp)
 or a string, following the conventions of the `sw-toolbox` library's
-[routing configuration](https://googlechrome.github.io/sw-toolbox/docs/master/tutorial-usage.html). Also required is
+[routing configuration](https://googlechrome.github.io/sw-toolbox/api.html#main). Also required is
 a `handler`, which should be either a string corresponding to one of the
-[built-in handlers](https://googlechrome.github.io/sw-toolbox/docs/master/tutorial-api.html) under the `toolbox.` namespace, or a function corresponding to your custom
-[request handler](https://googlechrome.github.io/sw-toolbox/docs/master/tutorial-usage). There is also
+[built-in handlers](https://googlechrome.github.io/sw-toolbox/api.html#handlers) under the `toolbox.` namespace, or a function corresponding to your custom
+[request handler](https://googlechrome.github.io/sw-toolbox/api.html#handlers).
+Optionally, `method` can be added to specify one of the [supported HTTP methods](https://googlechrome.github.io/sw-toolbox/api.html#expressive-approach) (_default: `'get'`_). There is also
 support for `options`, which corresponds to the same options supported by a
-[`sw-toolbox` handler](https://googlechrome.github.io/sw-toolbox/docs/master/tutorial-api.html).
+[`sw-toolbox` handler](https://googlechrome.github.io/sw-toolbox/api.html#handlers.
 
 For example, the following defines runtime caching behavior for two different URL patterns. It uses a
 different handler for each, and specifies a dedicated cache with maximum size for requests
@@ -535,9 +585,16 @@ community tailored to specific build environments. They include:
 There are also several starter kits or scaffolding projects that incorporate
 `sw-precache` into their build process, giving you a full service worker out of
 the box. The include:
+
+### CLIs
+
 - [`polymer-cli`](https://github.com/Polymer/polymer-cli)
-- [Polymer Starter Kit](https://github.com/polymerelements/polymer-starter-kit)
 - [`create-react-pwa`](https://github.com/jeffposnick/create-react-pwa)
+
+### Starter Kits
+
+- [`react-redux-universal-hot-example`](https://github.com/bertho-zero/react-redux-universal-hot-example)
+- [Polymer Starter Kit](https://github.com/polymerelements/polymer-starter-kit)
 - [Web Starter Kit](https://github.com/google/web-starter-kit)
 
 ### Recipes for writing a custom wrapper
@@ -545,6 +602,7 @@ the box. The include:
 While there are not always ready-to-use wrappers for specific environments, this list contains some recipes to integrate `sw-precache` in your workflow:
 
 - [Gradle wrapper for offline JavaDoc](https://gist.github.com/TimvdLippe/4c39b99e3b0ffbcdd8814a31e2969ed1)
+- [Brunch starter for Phoenix Framework](https://gist.github.com/natecox/b19c4e08408a5bf0d4cf4d74f1902260)
 
 ## Acknowledgements
 
@@ -555,7 +613,7 @@ Thanks to [Sindre Sorhus](https://github.com/sindresorhus) and
 
 ## License
 
-Copyright © 2016 Google, Inc.
+Copyright © 2017 Google, Inc.
 
 Licensed under the [Apache License, Version 2.0](LICENSE) (the "License"); 
 you may not use this file except in compliance with the License. You may 

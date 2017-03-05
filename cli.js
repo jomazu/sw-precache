@@ -21,7 +21,11 @@
 
 var meow = require('meow');
 var path = require('path');
+var pkg = require('./package.json');
 var swPrecache = require('./');
+var updateNotifier = require('update-notifier');
+
+updateNotifier({pkg: pkg}).notify();
 
 function setDefaults(cli, configFileFlags) {
   var compositeFlags = cli.flags;
@@ -33,6 +37,9 @@ function setDefaults(cli, configFileFlags) {
 
   compositeFlags.stripPrefix = compositeFlags.stripPrefix ||
     configFileFlags.stripPrefix || compositeFlags.root;
+
+  compositeFlags.stripPrefixMulti = compositeFlags.stripPrefixMulti ||
+    configFileFlags.stripPrefixMulti || {};
 
   compositeFlags.swFile = compositeFlags.swFile || configFileFlags.swFile ||
     'service-worker.js';
@@ -52,6 +59,10 @@ function setDefaults(cli, configFileFlags) {
 
   compositeFlags.navigateFallback = compositeFlags.navigateFallback ||
     configFileFlags.navigateFallback;
+
+  compositeFlags.navigateFallbackWhitelist =
+    compositeFlags.navigateFallbackWhitelist ||
+    configFileFlags.navigateFallbackWhitelist;
 
   compositeFlags.staticFileGlobs = compositeFlags.staticFileGlobs ||
     configFileFlags.staticFileGlobs;
@@ -103,13 +114,18 @@ function setDefaults(cli, configFileFlags) {
     (('clientsClaim' in configFileFlags) ?
       configFileFlags.clientsClaim : undefined);
 
+  compositeFlags.dontCacheBustUrlsMatching =
+    compositeFlags.dontCacheBustUrlsMatching ||
+    configFileFlags.dontCacheBustUrlsMatching;
+
   return compositeFlags;
 }
 
 var cli = meow({
   help: 'Options from https://github.com/GoogleChrome/sw-precache#options ' +
         'are accepted as flags.\nAlternatively, use --config <file>, where ' +
-        '<file> is the path to the JSON data representing the same options.\n' +
+        '<file> is the path to a JavaScript file that defines the same ' +
+        'options via module.exports.\n' +
         'When both a config file and command line option is given, the ' +
         'command line option takes precedence.'
 });
